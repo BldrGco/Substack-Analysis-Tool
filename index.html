@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Substack Data Analyzer</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body {
+            font-family: sans-serif;
+            margin: 20px;
+            background-color: #f4f4f4;
+            color: #333;
+        }
+        h1, h2 {
+            color: #007bff;
+            text-align: center;
+            margin-bottom: 20px;
+        }
+        #fileInputContainer {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        #fileInput {
+            padding: 10px 20px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            background-color: #fff;
+            cursor: pointer;
+        }
+        #output {
+            margin-top: 30px;
+            background-color: #fff;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+        .chart-container {
+            width: 95%;
+            max-width: 800px;
+            margin: 20px auto;
+            border: 1px solid #eee;
+            border-radius: 5px;
+            background-color: #f9f9f9;
+            padding: 15px;
+        }
+        #summary {
+            margin-top: 20px;
+            padding: 15px;
+            border: 1px solid #eee;
+            border-radius: 5px;
+            background-color: #f9f9f9;
+        }
+        #summary h3 {
+            color: #007bff;
+            margin-top: 0;
+        }
+        #summary p {
+            margin-bottom: 8px;
+        }
+        .trend-indicator {
+            font-weight: bold;
+        }
+        .positive {
+            color: green;
+        }
+        .negative {
+            color: red;
+        }
+        .neutral {
+            color: orange;
+        }
+    </style>
+</head>
+<body>
+    <h1>Substack Data Analysis Tool</h1>
+
+    <div id="fileInputContainer">
+        <input type="file" id="fileInput" accept=".csv">
+    </div>
+
+    <div id="output" style="display: none;">
+        <h2>Analysis and Trends</h2>
+        <div class="chart-container">
+            <canvas id="viewsChart"></canvas>
+        </div>
+        <div class="chart-container">
+            <canvas id="likesChart"></canvas>
+        </div>
+        <div class="chart-container">
+            <canvas id="commentsChart"></canvas>
+        </div>
+        <div class="chart-container">
+            <canvas id="followsChart"></canvas>
+        </div>
+        <div class="chart-container">
+            <canvas id="subscribersChart"></canvas>
+        </div>
+        <div id="summary">
+            <h3>Key Summary</h3>
+        </div>
+    </div>
+
+    <script>
+        const fileInput = document.getElementById('fileInput');
+        const outputDiv = document.getElementById('output');
+        const viewsChartCanvas = document.getElementById('viewsChart');
+        const likesChartCanvas = document.getElementById('likesChart');
+        const commentsChartCanvas = document.getElementById('commentsChart');
+        const followsChartCanvas = document.getElementById('followsChart');
+        const subscribersChartCanvas = document.getElementById('subscribersChart');
+        const summaryDiv = document.getElementById('summary');
+
+        let viewsChart, likesChart, commentsChart, followsChart, subscribersChart;
+
+        fileInput.addEventListener('change', handleFile);
+
+        function handleFile(event) {
+            const file = event.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    const csvData = e.target.result;
+                    const parsedData = parseCSV(csvData);
+                    if (parsedData && parsedData.length > 0) {
+                        outputDiv.style.display = 'block';
+                        analyzeData(parsedData);
+                    } else {
+                        outputDiv.style.display = 'none';
+                        alert("Could not parse CSV data or the file is empty.");
+                    }
+                };
+                reader.onerror = function() {
+                    alert("Error reading the CSV file.");
+                    outputDiv.style.display = 'none';
+                };
+                reader.readAsText(file);
+            } else {
+                outputDiv.style.display = 'none';
+            }
+        }
+
+        function parseCSV(csvText) {
+            const lines = csvText.trim().split('\n');
+            if (lines.length < 2) return []; // Need at least headers and one data row
+            const headers = lines[0].split(',').map(header => header.trim());
+            const data = [];
+            for (let i = 1; i < lines.length; i++) {
+                const values = lines[i].split(',').map(value => value.trim());
+                if (values.length === headers.length) {
+                    const entry = {};
+                    for (let j = 0; j < headers.length; j++) {
+                        entry[headers[j]] = values[j];
+                    }
+                    data.push(entry);
+                } else {
+                    console.warn(`Skipping row ${i+1} due to inconsistent number of columns.`);
+                }
+            }
+            return data;
+        }
+
+        function analyzeData(data) {
+            // Assuming your CSV has columns like 'Date', 'Views', 'Likes', 'Comments', 'Follows', 'Subscribers'
+            const dailyData = {};
+
+            const dateColumn = findColumn(Object.keys(data[0] || {}), ['Date', 'Published At', 'Day']);
+            const viewsColumn = findColumn(Object.keys(data[0] || {}), ['Views', 'Total Views']);
+            const likesColumn = findColumn(Object.keys(data[0] || {}), ['Likes', 'Total Likes']);
+            const commentsColumn = findColumn(Object.keys(data[0] || {}), ['Comments', 'Total Comments']);
+            const followsColumn = findColumn(Object.keys(data[0] || {}), ['Follows', 'New Follows']);
+            const subscribersColumn = findColumn(Object.keys(data[0] || {}), ['Subscribers', 'New Subscribers']);
+
+            if (!dateColumn) {
+                alert("Error: Could not find a 'Date' column in your CSV. Please ensure a date column exists.");
+                return;
+            }
+
+            data.forEach(item => {
+                const rawDate = item[dateColumn];
+                let date;
+                try {
+                    date = new Date(rawDate);
+                    if (isNaN(date)) {
+                        // Try a different date format if parsing fails
+                        const parts = rawDate.split(/[-/ ]/);
+                        if (parts.length === 3) {
+                            const year = parseInt(parts[0]);
+                            const month = parseInt(parts[1]) - 1; // Month is 0-indexed
+                            const day = parseInt(parts[2]);
+                            date = new Date(year, month, day);
+                        }
+                        if (isNaN(date)) {
+                            console.warn(`Could not parse date: ${rawDate}. Skipping data point.`);
+                            return;
+                        }
+                    }
+                    const formattedDate = date.toLocaleDateString();
+                    dailyData[formattedDate] = dailyData[formattedDate] || { views: 0, likes: 0, comments: 0, follows: 0, subscribers: 0 };
+
+                    dailyData[formattedDate].views += parseInt(item[viewsColumn] || 0);
+                    dailyData[formattedDate].likes += parseInt(item[likesColumn] || 0);
+                    dailyData[formattedDate].comments += parseInt(item[commentsColumn] || 0);
+                    dailyData[formattedDate].follows += parseInt(item[followsColumn] || 0);
+                    dailyData[formattedDate].subscribers += parseInt(item[subscribersColumn] || 0);
+
+                } catch (error) {
+                    console.warn(`Error processing date "${rawDate}": ${error}. Skipping data point.`);
+                }
+            });
+
+            const sortedDates = Object.keys(dailyData).sort((a, b) => new Date(a) - new Date(b));
+
+            createLineChart(viewsChartCanvas, sortedDates, sortedDates.map(date => dailyData[date].views), 'Daily Views', 'blue');
+            createLineChart(likesChartCanvas, sortedDates, sortedDates.map(date => dailyData[date].likes), 'Daily Likes', 'green');
+            createLineChart(commentsChartCanvas, sortedDates, sortedDates.map(date => dailyData[date].comments), 'Daily Comments', 'purple');
+            createLineChart(followsChartCanvas, sortedDates, sortedDates.map(date => dailyData[date].follows), 'Daily Follows', 'orange');
+            createLineChart(subscribersChartCanvas, sortedDates, sortedDates.map(date => dailyData[date].subscribers), 'Daily Subscribers', 'teal');
+
+            displaySummary(dailyData);
+        }
+
+        function findColumn(headers, potentialNames) {
+            for (const name of potentialNames) {
+                if (headers.includes(name)) {
+                    return name;
+                }
+            }
+            return null;
+        }
+
+        function createLineChart(canvas, labels, data, label, color) {
+            if (!canvas) return;
+            const ctx = canvas.getContext('2d');
+            if (canvas.chart) {
+                canvas.chart.destroy();
+            }
+            canvas.chart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: label,
+                        data: data,
+                        borderColor: color,
+                        fill: false,
+                        tension: 0.1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: {
+                            beginAtZero: true
+                        }
+                    },
+                    plugins: {
+                        title: {
+                            display: true,
+                            text: label
+                        }
+                    }
+                }
+            });
+        }
+
+        function displaySummary(data) {
+            const dates = Object.keys(data).sort((a, b) => new Date(a) - new Date(b));
+            if (dates.length < 2) {
+                summaryDiv.innerHTML = '<h3>Key Summary</h3><p>Not enough data to calculate trends.</p>';
+                return;
+            }
+
+            const latestDate = dates[dates.length - 1];
+            const previousDate = dates[dates.length - 2];
+
+            const latestData = data[latestDate];
+            const previousData = data[previousDate];
+
+            let summaryHTML = '<h3>Key Summary</h3>';
+
+            summaryHTML += createTrendParagraph('Views', latestData.views, previousData.views);
+            summaryHTML += createTrendParagraph('Likes', latestData.likes, previousData.likes);
+            summaryHTML += createTrendParagraph('Comments', latestData.comments, previousData.comments);
+            summaryHTML += createTrendParagraph('Follows', latestData.follows, previousData.follows);
+            summaryHTML += createTrendParagraph('Subscribers', latestData.subscribers, previousData.subscribers);
+
+            summaryDiv.innerHTML = summaryHTML;
+        }
+
+        function createTrendParagraph(metricName, currentValue, previousValue) {
+            const difference = currentValue - previousValue;
+            let trendClass = 'neutral';
+            let trendText = 'No significant change';
+            if (difference > 0) {
+                trendClass = 'positive';
+                trendText = `Increased by ${difference}`;
+            } else if (difference < 0) {
+                trendClass = 'negative';
+                trendText = `Decreased by ${Math.abs(difference)}`;
+            }
+            return `<p>${metricName}: <span class="trend-indicator ${trendClass}">${trendText}</span> (compared to previous day)</p>`;
+        }
+    </script>
+</body>
+</html>
